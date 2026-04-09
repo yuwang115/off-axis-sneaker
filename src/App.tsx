@@ -15,9 +15,9 @@ function App() {
   const [showCalibration, setShowCalibration] = useState(false);
   const [calibration, setCalibration] = useState<CalibrationData>(calibrationManager.getCalibration());
   const [debugMode, setDebugMode] = useState(false);
-  const [shoePosition, setShoePosition] = useState({ x: 0, y: -0.09, z: -0.03 });
-  const [shoeScale, setShoeScale] = useState(0.071);
-  const [shoeRotation, setShoeRotation] = useState({ x: 0, y: -0.628, z: 0 });
+  const [shoePosition, setShoePosition] = useState({ x: 0.07, y: -0.14, z: -0.1 });
+  const [shoeScale, setShoeScale] = useState(0.053);
+  const [shoeRotation, setShoeRotation] = useState({ x: 0, y: 48 * Math.PI / 180, z: 0 });
   const headPoseTrackerRef = useRef(new HeadPoseTracker(0.3));
   const threeViewRef = useRef<ThreeViewHandle>(null);
 

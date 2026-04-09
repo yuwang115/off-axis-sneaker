@@ -11,6 +11,14 @@ export interface ThreeSceneOptions {
   height?: number;
 }
 
+/** Path to the GLB room model in public/models/ */
+const ROOM_GLB_PATH = '/models/the_great_drawing_room.glb';
+
+/** User-tuned default transform for the room model */
+const DEFAULT_ROOM_POSITION = { x: 0.07, y: -0.14, z: -0.1 } as const;
+const DEFAULT_ROOM_SCALE = 0.053;
+const DEFAULT_ROOM_ROTATION_Y = 48 * Math.PI / 180; // 48°
+
 export class ThreeSceneManager {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -47,25 +55,45 @@ export class ThreeSceneManager {
     });
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Enable clipping planes to slice the room's front wall open
+    this.renderer.localClippingEnabled = true;
     options.container.appendChild(this.renderer.domElement);
 
-    this.loadShoeModel();
-    this.createWireframeRoom();
+    this.setupLighting();
+    this.loadGLBRoom();
     this.createDebugHelpers();
   }
 
-  private loadShoeModel(): void {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  private setupLighting(): void {
+    // Ambient light for base illumination
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     this.scene.add(ambientLight);
 
-    const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight1.position.set(1, 1, 1);
-    this.scene.add(directionalLight1);
+    // Main directional light (simulates window/ceiling light)
+    const mainLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+    mainLight.position.set(0.2, 0.3, 0.5);
+    mainLight.castShadow = true;
+    mainLight.shadow.mapSize.set(1024, 1024);
+    mainLight.shadow.camera.near = 0.01;
+    mainLight.shadow.camera.far = 5;
+    this.scene.add(mainLight);
 
-    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
-    directionalLight2.position.set(-1, -1, 0.5);
-    this.scene.add(directionalLight2);
+    // Fill light from the opposite side
+    const fillLight = new THREE.DirectionalLight(0xe6f0ff, 0.4);
+    fillLight.position.set(-0.3, 0.1, -0.2);
+    this.scene.add(fillLight);
 
+    // Warm point light (simulates a lamp in the room)
+    const pointLight = new THREE.PointLight(0xffaa66, 0.5, 2);
+    pointLight.position.set(0, 0.1, -0.15);
+    this.scene.add(pointLight);
+  }
+
+  private loadGLBRoom(): void {
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
     dracoLoader.setDecoderConfig({ type: 'js' });
@@ -74,118 +102,53 @@ export class ThreeSceneManager {
     loader.setDRACOLoader(dracoLoader);
 
     loader.load(
-      '/models/shoe.glb',
+      ROOM_GLB_PATH,
       (gltf) => {
         this.model = gltf.scene;
-        this.model.position.set(0, -0.09, -0.03);
-        this.model.rotation.set(0, -0.628, 0);
-        this.model.scale.set(0.071, 0.071, 0.071);
+
+        // Apply user-tuned default transform
+        this.model.position.set(
+          DEFAULT_ROOM_POSITION.x,
+          DEFAULT_ROOM_POSITION.y,
+          DEFAULT_ROOM_POSITION.z
+        );
+        this.model.scale.setScalar(DEFAULT_ROOM_SCALE);
+        this.model.rotation.set(0, DEFAULT_ROOM_ROTATION_Y, 0);
+
+        // Clipping plane at z=0 (screen surface) — slices away
+        // the front wall so we look "through the screen" into the room
+        const clipPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+
+        // Enable shadows, double-sided rendering, and clipping on all meshes
+        this.model.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            const applyToMaterial = (m: THREE.Material) => {
+              m.side = THREE.DoubleSide;
+              m.clippingPlanes = [clipPlane];
+              m.clipShadows = true;
+            };
+            if (Array.isArray(child.material)) {
+              child.material.forEach(applyToMaterial);
+            } else if (child.material instanceof THREE.Material) {
+              applyToMaterial(child.material);
+            }
+          }
+        });
+
         this.scene.add(this.model);
       },
-      undefined,
-      (error) => {
-        console.error('Error loading shoe model:', error);
-      }
-    );
-  }
-
-  private createWireframeRoom(): void {
-    this.removeWireframeRoom();
-
-    const screenDims = this.offAxisCamera.getScreenDimensions();
-    const roomWidth = screenDims.width;
-    const roomHeight = screenDims.height;
-    const roomDepth = 0.35;
-    const gridDivisions = 8;
-    const gridColor = 0xff8c00;
-
-    const wallMaterial = new THREE.LineBasicMaterial({
-      color: gridColor,
-      transparent: true,
-      opacity: 0.8,
-      depthTest: true,
-      depthWrite: true,
-      linewidth: 8
-    });
-
-    const createGridWall = (width: number, height: number): THREE.LineSegments => {
-      const geometry = new THREE.BufferGeometry();
-      const vertices: number[] = [];
-
-      for (let i = 0; i <= gridDivisions; i++) {
-        const t = i / gridDivisions;
-        vertices.push(-width / 2 + t * width, -height / 2, 0);
-        vertices.push(-width / 2 + t * width, height / 2, 0);
-      }
-
-      for (let i = 0; i <= gridDivisions; i++) {
-        const t = i / gridDivisions;
-        vertices.push(-width / 2, -height / 2 + t * height, 0);
-        vertices.push(width / 2, -height / 2 + t * height, 0);
-      }
-
-      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      return new THREE.LineSegments(geometry, wallMaterial);
-    };
-
-    const backWall = createGridWall(roomWidth, roomHeight);
-    backWall.position.z = -roomDepth;
-    this.scene.add(backWall);
-    this.roomObjects.push(backWall);
-
-    const leftWall = createGridWall(roomDepth, roomHeight);
-    leftWall.rotation.y = Math.PI / 2;
-    leftWall.position.x = -roomWidth / 2;
-    leftWall.position.z = -roomDepth / 2;
-    this.scene.add(leftWall);
-    this.roomObjects.push(leftWall);
-
-    const rightWall = createGridWall(roomDepth, roomHeight);
-    rightWall.rotation.y = -Math.PI / 2;
-    rightWall.position.x = roomWidth / 2;
-    rightWall.position.z = -roomDepth / 2;
-    this.scene.add(rightWall);
-    this.roomObjects.push(rightWall);
-
-    const floor = createGridWall(roomWidth, roomDepth);
-    floor.rotation.x = Math.PI / 2;
-    floor.position.y = -roomHeight / 2;
-    floor.position.z = -roomDepth / 2;
-    this.scene.add(floor);
-    this.roomObjects.push(floor);
-
-    const ceiling = createGridWall(roomWidth, roomDepth);
-    ceiling.rotation.x = -Math.PI / 2;
-    ceiling.position.y = roomHeight / 2;
-    ceiling.position.z = -roomDepth / 2;
-    this.scene.add(ceiling);
-    this.roomObjects.push(ceiling);
-
-    const screenFrame = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.PlaneGeometry(roomWidth, roomHeight)),
-      new THREE.LineBasicMaterial({
-        color: 0xff0000,
-        linewidth: 4,
-        depthTest: true,
-        depthWrite: true
-      })
-    );
-    screenFrame.position.z = 0.001;
-    this.scene.add(screenFrame);
-    this.roomObjects.push(screenFrame);
-  }
-
-  private removeWireframeRoom(): void {
-    this.roomObjects.forEach(obj => {
-      this.scene.remove(obj);
-      if (obj instanceof THREE.LineSegments) {
-        obj.geometry.dispose();
-        if (obj.material instanceof THREE.Material) {
-          obj.material.dispose();
+      (progress) => {
+        if (progress.total > 0) {
+          const pct = ((progress.loaded / progress.total) * 100).toFixed(0);
+          console.log(`Loading room: ${pct}%`);
         }
+      },
+      (error) => {
+        console.error('Error loading room model:', error);
       }
-    });
-    this.roomObjects = [];
+    );
   }
 
   private createDebugHelpers(): void {
@@ -216,7 +179,6 @@ export class ThreeSceneManager {
 
   updateCalibration(calibration: CalibrationData): void {
     this.offAxisCamera.updateCalibration(calibration);
-    this.createWireframeRoom();
   }
 
   updateModelPosition(x: number, y: number, z: number): void {
@@ -239,14 +201,14 @@ export class ThreeSceneManager {
         z: this.model.position.z
       };
     }
-    return { x: 0, y: -0.09, z: -0.03 };
+    return { ...DEFAULT_ROOM_POSITION };
   }
 
   getModelScale(): number {
     if (this.model) {
       return this.model.scale.x;
     }
-    return 0.071;
+    return DEFAULT_ROOM_SCALE;
   }
 
   updateModelRotation(x: number, y: number, z: number): void {
@@ -263,7 +225,7 @@ export class ThreeSceneManager {
         z: this.model.rotation.z
       };
     }
-    return { x: 0, y: -0.628, z: 0 };
+    return { x: 0, y: DEFAULT_ROOM_ROTATION_Y, z: 0 };
   }
 
   private animate = (): void => {
