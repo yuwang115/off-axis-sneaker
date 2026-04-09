@@ -4,6 +4,8 @@ import FaceMeshView from './components/FaceMeshView';
 import ThreeView, { ThreeViewHandle } from './components/ThreeView';
 import CalibrationWizard from './components/CalibrationWizard';
 import ShoeControlPanel from './components/ShoeControlPanel';
+import ForceFieldGlassOverlay from './features/force-field/ForceFieldGlassOverlay';
+import { FORCE_FIELD_COPY } from './features/force-field/copy';
 import { HeadPose, HeadPoseTracker } from './utils/headPose';
 import { calibrationManager, CalibrationData } from './utils/calibration';
 
@@ -13,7 +15,6 @@ function App() {
   const [currentHeadPose, setCurrentHeadPose] = useState<HeadPose | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCalibration, setShowCalibration] = useState(false);
-  const [calibration, setCalibration] = useState<CalibrationData>(calibrationManager.getCalibration());
   const [debugMode, setDebugMode] = useState(false);
   const [shoePosition, setShoePosition] = useState({ x: 0.07, y: -0.14, z: -0.1 });
   const [shoeScale, setShoeScale] = useState(0.053);
@@ -110,7 +111,6 @@ function App() {
   }, []);
 
   const handleCalibrationComplete = (newCalibration: CalibrationData) => {
-    setCalibration(newCalibration);
     if (threeViewRef.current) {
       threeViewRef.current.updateCalibration(newCalibration);
     }
@@ -176,6 +176,8 @@ function App() {
             ref={threeViewRef}
           />
         </div>
+
+        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} />
 
         <ShoeControlPanel
           onPositionChange={handleShoePositionChange}
