@@ -1,3 +1,5 @@
+import type { NormalizedLandmark } from '@mediapipe/tasks-vision';
+
 export interface HeadPose {
   x: number;
   y: number;
@@ -19,7 +21,7 @@ export class HeadPoseTracker {
     this.smoothingFactor = Math.max(0.1, Math.min(0.9, smoothingFactor));
   }
 
-  extractHeadPoseFromLandmarks(landmarks: any[]): HeadPose | null {
+  extractHeadPoseFromLandmarks(landmarks: NormalizedLandmark[][]): HeadPose | null {
     if (!landmarks || landmarks.length === 0) {
       return null;
     }
