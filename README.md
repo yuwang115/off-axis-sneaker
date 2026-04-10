@@ -4,8 +4,6 @@ A real-time head-tracking 3D viewer that creates an immersive "Johnny Chung Lee"
 
 <img src="public/media/demo-shot.png" alt="Demo" width="800" />
 
-[Live Link](https://off-axis-sneaker.bolt.host)
-
 ## Features
 
 - 👁️ Real-time head tracking using MediaPipe Face Mesh
