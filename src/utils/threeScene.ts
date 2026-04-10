@@ -19,6 +19,9 @@ const DEFAULT_ROOM_POSITION = { x: 0.07, y: -0.14, z: -0.1 } as const;
 const DEFAULT_ROOM_SCALE = 0.053;
 const DEFAULT_ROOM_ROTATION_Y = 48 * Math.PI / 180; // 48°
 
+/** Rolling window size for render FPS calculation */
+const RENDER_FPS_WINDOW = 60;
+
 export class ThreeSceneManager {
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -31,6 +34,8 @@ export class ThreeSceneManager {
   private debugMode: boolean = false;
   private debugHelpers: THREE.Object3D[] = [];
   private roomObjects: THREE.Object3D[] = [];
+  private frameTimestamps: number[] = [];
+  private renderFps: number = 0;
 
   constructor(options: ThreeSceneOptions) {
     const width = options.width || options.container.clientWidth;
@@ -233,6 +238,19 @@ export class ThreeSceneManager {
 
     this.animationFrameId = requestAnimationFrame(this.animate);
 
+    // Track rolling render FPS
+    const now = performance.now();
+    this.frameTimestamps.push(now);
+    if (this.frameTimestamps.length > RENDER_FPS_WINDOW) {
+      this.frameTimestamps.shift();
+    }
+    if (this.frameTimestamps.length >= 2) {
+      const spanSeconds = (this.frameTimestamps[this.frameTimestamps.length - 1] - this.frameTimestamps[0]) / 1000;
+      if (spanSeconds > 0) {
+        this.renderFps = Math.round(((this.frameTimestamps.length - 1) / spanSeconds) * 10) / 10;
+      }
+    }
+
     this.offAxisCamera.updateFromHeadPose(this.currentHeadPose);
 
     if (this.debugMode && this.debugHelpers.length > 1) {
@@ -242,6 +260,10 @@ export class ThreeSceneManager {
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  getRenderFps(): number {
+    return this.renderFps;
+  }
 
   start(): void {
     if (!this.isRunning) {

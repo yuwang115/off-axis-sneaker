@@ -1,25 +1,25 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Maximize, Minimize, Settings, Bug } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Maximize, Minimize, Settings, Bug, Type } from 'lucide-react';
 import FaceMeshView from './components/FaceMeshView';
 import ThreeView, { ThreeViewHandle } from './components/ThreeView';
 import CalibrationWizard from './components/CalibrationWizard';
 import ShoeControlPanel from './components/ShoeControlPanel';
 import ForceFieldGlassOverlay from './features/force-field/ForceFieldGlassOverlay';
 import { FORCE_FIELD_COPY } from './features/force-field/copy';
-import { HeadPose, HeadPoseTracker } from './utils/headPose';
 import { calibrationManager, CalibrationData } from './utils/calibration';
 
 function App() {
   const [isCdnAvailable, setIsCdnAvailable] = useState(true);
   const [isCheckingCdn, setIsCheckingCdn] = useState(true);
-  const [currentHeadPose, setCurrentHeadPose] = useState<HeadPose | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCalibration, setShowCalibration] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
+  const [showTextOverlay, setShowTextOverlay] = useState(true);
   const [shoePosition, setShoePosition] = useState({ x: 0.07, y: -0.14, z: -0.1 });
   const [shoeScale, setShoeScale] = useState(0.053);
   const [shoeRotation, setShoeRotation] = useState({ x: 0, y: 48 * Math.PI / 180, z: 0 });
-  const headPoseTrackerRef = useRef(new HeadPoseTracker(0.3));
+  const [cameraFps, setCameraFps] = useState(0);
+  const [renderFps, setRenderFps] = useState(0);
   const threeViewRef = useRef<ThreeViewHandle>(null);
 
   useEffect(() => {
@@ -57,24 +57,18 @@ function App() {
     return () => clearInterval(intervalId);
   }, []);
 
-  const handleHeadPoseUpdate = useCallback((rawPose: HeadPose | null) => {
-    if (rawPose) {
-      const smoothedPose = headPoseTrackerRef.current.extractHeadPoseFromLandmarks([
-        Array(468).fill(null).map((_, i) => {
-          if (i === 133) return { x: rawPose.x - 0.05, y: rawPose.y, z: 0 };
-          if (i === 362) return { x: rawPose.x + 0.05, y: rawPose.y, z: 0 };
-          if (i === 1) return { x: rawPose.x, y: rawPose.y, z: 0 };
-          if (i === 33) return { x: rawPose.x - 0.08, y: rawPose.y, z: 0 };
-          if (i === 263) return { x: rawPose.x + 0.08, y: rawPose.y, z: 0 };
-          return { x: 0, y: 0, z: 0 };
-        })
-      ]);
-      if (smoothedPose) {
-        setCurrentHeadPose(smoothedPose);
-      }
-    } else {
-      setCurrentHeadPose(null);
-    }
+  // Throttled FPS reporting from FaceMeshView — fires ≈2 Hz, not on the hot path
+  const handleCameraFpsUpdate = useCallback((fps: number) => {
+    setCameraFps(fps);
+  }, []);
+
+  // Poll render FPS from ThreeView at 2 Hz (also not on hot path)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const fps = threeViewRef.current?.getRenderFps() ?? 0;
+      setRenderFps(fps);
+    }, 500);
+    return () => clearInterval(interval);
   }, []);
 
   const toggleFullscreen = useCallback(async () => {
@@ -171,13 +165,17 @@ function App() {
         )}
 
         <div className="absolute inset-0">
-          <ThreeView
-            headPose={currentHeadPose}
-            ref={threeViewRef}
-          />
+          <ThreeView ref={threeViewRef} />
         </div>
 
-        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} />
+        {debugMode && (
+          <div className="absolute top-4 right-4 z-20 px-3 py-2 bg-black bg-opacity-60 text-white text-xs font-mono rounded backdrop-blur-sm pointer-events-none">
+            <div>Camera: {cameraFps.toFixed(1)} FPS</div>
+            <div>Render: {renderFps.toFixed(1)} FPS</div>
+          </div>
+        )}
+
+        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} enabled={showTextOverlay} />
 
         <ShoeControlPanel
           onPositionChange={handleShoePositionChange}
@@ -190,7 +188,10 @@ function App() {
 
         <div className="absolute bottom-4 right-4 z-10 rounded-lg overflow-hidden shadow-2xl border-2 border-white">
           <div className="w-64 h-48">
-            <FaceMeshView onHeadPoseUpdate={handleHeadPoseUpdate} />
+            <FaceMeshView
+              threeViewRef={threeViewRef}
+              onFpsUpdate={handleCameraFpsUpdate}
+            />
           </div>
         </div>
 
@@ -220,6 +221,15 @@ function App() {
             title="Toggle debug mode"
           >
             <Bug size={14} />
+          </button>
+
+          <button
+            onClick={() => setShowTextOverlay((prev) => !prev)}
+            className={`p-1.5 ${showTextOverlay ? 'bg-black bg-opacity-50' : 'bg-black bg-opacity-80'} hover:bg-opacity-70 text-white rounded transition-colors backdrop-blur-sm`}
+            aria-label="Toggle text overlay"
+            title="Toggle text overlay"
+          >
+            <Type size={14} className={showTextOverlay ? 'opacity-100' : 'opacity-40'} />
           </button>
         </div>
       </main>

@@ -4,7 +4,8 @@ import { HeadPose } from '../utils/headPose';
 import { CalibrationData } from '../utils/calibration';
 
 interface ThreeViewProps {
-  headPose: HeadPose | null;
+  /** Optional legacy head pose prop — the hot path now uses updateHeadPose() via ref for lower latency */
+  headPose?: HeadPose | null;
 }
 
 export interface ThreeViewHandle {
@@ -16,6 +17,8 @@ export interface ThreeViewHandle {
   getModelPosition: () => { x: number; y: number; z: number };
   getModelScale: () => number;
   getModelRotation: () => { x: number; y: number; z: number };
+  updateHeadPose: (pose: HeadPose) => void;
+  getRenderFps: () => number;
 }
 
 const ThreeView = forwardRef<ThreeViewHandle, ThreeViewProps>(({ headPose }, ref) => {
@@ -101,6 +104,17 @@ const ThreeView = forwardRef<ThreeViewHandle, ThreeViewProps>(({ headPose }, ref
         return sceneManagerRef.current.getModelRotation();
       }
       return { x: 0, y: 48 * Math.PI / 180, z: 0 };
+    },
+    updateHeadPose: (pose: HeadPose) => {
+      if (sceneManagerRef.current) {
+        sceneManagerRef.current.updateHeadPose(pose);
+      }
+    },
+    getRenderFps: () => {
+      if (sceneManagerRef.current) {
+        return sceneManagerRef.current.getRenderFps();
+      }
+      return 0;
     },
   }));
 
