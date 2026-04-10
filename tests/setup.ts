@@ -11,6 +11,11 @@ type MockCanvasContext = {
   textBaseline: CanvasTextBaseline;
   lineWidth: number;
   globalAlpha: number;
+  shadowColor: string;
+  shadowBlur: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  letterSpacing: string;
   save: () => void;
   restore: () => void;
   clearRect: (...args: number[]) => void;
@@ -52,6 +57,11 @@ function createMockContext(canvas: HTMLCanvasElement): MockCanvasContext {
     textBaseline: 'alphabetic',
     lineWidth: 1,
     globalAlpha: 1,
+    shadowColor: 'rgba(0, 0, 0, 0)',
+    shadowBlur: 0,
+    shadowOffsetX: 0,
+    shadowOffsetY: 0,
+    letterSpacing: '0px',
     save: vi.fn(),
     restore: vi.fn(),
     clearRect: vi.fn(),
@@ -96,6 +106,7 @@ Object.defineProperty(document, 'fonts', {
   configurable: true,
   value: {
     ready: Promise.resolve(),
+    load: () => Promise.resolve([]),
   },
 });
 
@@ -126,10 +137,10 @@ Object.defineProperty(HTMLCanvasElement.prototype, 'getBoundingClientRect', {
       y: 0,
       top: 0,
       left: 0,
-      bottom: 600,
-      right: 800,
-      width: 800,
-      height: 600,
+      bottom: 800,
+      right: 1200,
+      width: 1200,
+      height: 800,
       toJSON() {
         return {};
       },
@@ -145,10 +156,10 @@ Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
       y: 0,
       top: 0,
       left: 0,
-      bottom: 600,
-      right: 800,
-      width: 800,
-      height: 600,
+      bottom: 800,
+      right: 1200,
+      width: 1200,
+      height: 800,
       toJSON() {
         return {};
       },

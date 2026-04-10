@@ -3,15 +3,25 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import ForceFieldGlassOverlay from './ForceFieldGlassOverlay';
-import { FORCE_FIELD_COPY } from './copy';
+import {
+  FORCE_FIELD_COPY_LEFT,
+  FORCE_FIELD_COPY_LEFT_LABEL,
+  FORCE_FIELD_COPY_RIGHT,
+  FORCE_FIELD_COPY_RIGHT_LABEL,
+} from './copy';
 
 describe('ForceFieldGlassOverlay', () => {
   it('creates a high-DPI canvas and cancels its animation frame on unmount', async () => {
     const cancelAnimationFrameSpy = vi.spyOn(window, 'cancelAnimationFrame');
 
     const { unmount } = render(
-      <div className="relative h-[600px] w-[800px]">
-        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} />
+      <div className="relative h-[800px] w-[1200px]">
+        <ForceFieldGlassOverlay
+          leftText={FORCE_FIELD_COPY_LEFT}
+          rightText={FORCE_FIELD_COPY_RIGHT}
+          leftLabel={FORCE_FIELD_COPY_LEFT_LABEL}
+          rightLabel={FORCE_FIELD_COPY_RIGHT_LABEL}
+        />
       </div>,
     );
 
@@ -22,8 +32,8 @@ describe('ForceFieldGlassOverlay', () => {
       expect(overlay).toHaveAttribute('data-force-field-ready', 'true');
     });
 
-    expect(canvas).toHaveAttribute('width', '1600');
-    expect(canvas).toHaveAttribute('height', '1200');
+    expect(canvas).toHaveAttribute('width', '2400');
+    expect(canvas).toHaveAttribute('height', '1600');
 
     unmount();
 
@@ -34,9 +44,12 @@ describe('ForceFieldGlassOverlay', () => {
     const onClick = vi.fn();
 
     render(
-      <div className="relative h-[600px] w-[800px]">
+      <div className="relative h-[800px] w-[1200px]">
         <button onClick={onClick}>Open controls</button>
-        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} />
+        <ForceFieldGlassOverlay
+          leftText={FORCE_FIELD_COPY_LEFT}
+          rightText={FORCE_FIELD_COPY_RIGHT}
+        />
       </div>,
     );
 
@@ -54,8 +67,11 @@ describe('ForceFieldGlassOverlay', () => {
 
   it('updates its pointer dataset from global pointer and visibility events', async () => {
     render(
-      <div className="relative h-[600px] w-[800px]">
-        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} />
+      <div className="relative h-[800px] w-[1200px]">
+        <ForceFieldGlassOverlay
+          leftText={FORCE_FIELD_COPY_LEFT}
+          rightText={FORCE_FIELD_COPY_RIGHT}
+        />
       </div>,
     );
 
@@ -74,8 +90,12 @@ describe('ForceFieldGlassOverlay', () => {
 
   it('returns null when disabled', () => {
     render(
-      <div className="relative h-[600px] w-[800px]">
-        <ForceFieldGlassOverlay enabled={false} text={FORCE_FIELD_COPY} />
+      <div className="relative h-[800px] w-[1200px]">
+        <ForceFieldGlassOverlay
+          enabled={false}
+          leftText={FORCE_FIELD_COPY_LEFT}
+          rightText={FORCE_FIELD_COPY_RIGHT}
+        />
       </div>,
     );
 

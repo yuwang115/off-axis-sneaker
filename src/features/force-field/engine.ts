@@ -3,10 +3,26 @@ import { layoutWithLines, type PreparedTextWithSegments } from '@chenglou/pretex
 import {
   FORCE_FIELD_ACTIVE_COLOR,
   FORCE_FIELD_BASELINE_RATIO,
-  FORCE_FIELD_GLASS_EDGE_ALPHA,
-  FORCE_FIELD_GLASS_FILL_ALPHA,
+  FORCE_FIELD_GLASS_BORDER_BOTTOM,
+  FORCE_FIELD_GLASS_BORDER_TOP,
+  FORCE_FIELD_GLASS_BOTTOM_TINT,
+  FORCE_FIELD_GLASS_MID_TINT,
+  FORCE_FIELD_GLASS_SWEEP_SPEED,
+  FORCE_FIELD_GLASS_SWEEP_TINT,
+  FORCE_FIELD_GLASS_TOP_HIGHLIGHT,
+  FORCE_FIELD_GLASS_TOP_TINT,
+  FORCE_FIELD_GLASS_UPPER_MID_TINT,
   FORCE_FIELD_IDLE_COLOR,
-  FORCE_FIELD_SWEEP_ALPHA,
+  FORCE_FIELD_LABEL_COLOR,
+  FORCE_FIELD_LABEL_FONT,
+  FORCE_FIELD_LABEL_OFFSET_Y,
+  FORCE_FIELD_LABEL_TRACKING_EM,
+  FORCE_FIELD_POINTER_GLOW_CENTER,
+  FORCE_FIELD_POINTER_GLOW_MID,
+  FORCE_FIELD_TEXT_SHADOW_BLUR,
+  FORCE_FIELD_TEXT_SHADOW_COLOR,
+  FORCE_FIELD_TEXT_SHADOW_OFFSET_Y,
+  type RgbaColor,
 } from './constants';
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, {
@@ -38,14 +54,41 @@ export type ForceFieldPhysicsConfig = {
   dtCap: number;
 };
 
-type BuildForceFieldParticlesOptions = {
-  prepared: PreparedTextWithSegments;
+export type ColumnGeometry = {
+  startX: number;
+  startY: number;
+  columnWidth: number;
+  lineCount: number;
+};
+
+export type TwoColumnGeometry = {
+  left: ColumnGeometry;
+  right: ColumnGeometry;
+  totalWidth: number;
+  blockHeight: number;
+  blockTopY: number;
+};
+
+type MeasureText = (text: string) => number;
+
+type ComputeTwoColumnGeometryOptions = {
+  leftPrepared: PreparedTextWithSegments;
+  rightPrepared: PreparedTextWithSegments;
   viewportWidth: number;
   viewportHeight: number;
   lineHeight: number;
   textPadding: number;
-  maxTextWidth: number;
-  measureText: (text: string) => number;
+  columnWidth: number;
+  columnGutter: number;
+};
+
+type BuildTwoColumnForceFieldParticlesOptions = ComputeTwoColumnGeometryOptions & {
+  measureText: MeasureText;
+};
+
+type BuildTwoColumnForceFieldParticlesResult = {
+  particles: ForceFieldParticle[];
+  geometry: TwoColumnGeometry | null;
 };
 
 type RenderForceFieldOptions = {
@@ -56,6 +99,8 @@ type RenderForceFieldOptions = {
   viewportHeight: number;
   pointerRadius: number;
   time: number;
+  geometry?: TwoColumnGeometry | null;
+  labels?: { left: string; right: string };
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -66,36 +111,56 @@ function lerp(start: number, end: number, t: number): number {
   return start + (end - start) * t;
 }
 
+function tint(color: RgbaColor): string {
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a})`;
+}
+
+function withAlpha(color: RgbaColor, alpha: number): string {
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+}
+
 function drawGlassSurface(
   ctx: CanvasRenderingContext2D,
   viewportWidth: number,
   viewportHeight: number,
   time: number,
 ): void {
+  // Four-stop vertical gradient — darker at edges, clearer in the middle.
   const edgeGradient = ctx.createLinearGradient(0, 0, 0, viewportHeight);
-  edgeGradient.addColorStop(0, `rgba(255, 255, 255, ${FORCE_FIELD_GLASS_EDGE_ALPHA})`);
-  edgeGradient.addColorStop(0.18, `rgba(255, 255, 255, ${FORCE_FIELD_GLASS_FILL_ALPHA})`);
-  edgeGradient.addColorStop(0.75, 'rgba(255, 255, 255, 0)');
-  edgeGradient.addColorStop(1, `rgba(170, 190, 255, ${FORCE_FIELD_GLASS_FILL_ALPHA})`);
+  edgeGradient.addColorStop(0, tint(FORCE_FIELD_GLASS_TOP_TINT));
+  edgeGradient.addColorStop(0.18, tint(FORCE_FIELD_GLASS_UPPER_MID_TINT));
+  edgeGradient.addColorStop(0.55, tint(FORCE_FIELD_GLASS_MID_TINT));
+  edgeGradient.addColorStop(1, tint(FORCE_FIELD_GLASS_BOTTOM_TINT));
 
   ctx.fillStyle = edgeGradient;
   ctx.fillRect(0, 0, viewportWidth, viewportHeight);
 
+  // Specular highlight at the very top edge — reads as beveled light.
+  const topHighlight = ctx.createLinearGradient(0, 0, 0, 26);
+  topHighlight.addColorStop(0, tint(FORCE_FIELD_GLASS_TOP_HIGHLIGHT));
+  topHighlight.addColorStop(1, withAlpha(FORCE_FIELD_GLASS_TOP_HIGHLIGHT, 0));
+
+  ctx.fillStyle = topHighlight;
+  ctx.fillRect(0, 0, viewportWidth, 26);
+
+  // Hairline border: cool silver TL → warm brass BR (subtle metal vibe).
   const borderGradient = ctx.createLinearGradient(0, 0, viewportWidth, viewportHeight);
-  borderGradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
-  borderGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
-  borderGradient.addColorStop(1, 'rgba(141, 168, 255, 0.12)');
+  borderGradient.addColorStop(0, tint(FORCE_FIELD_GLASS_BORDER_TOP));
+  borderGradient.addColorStop(0.5, withAlpha(FORCE_FIELD_GLASS_BORDER_TOP, 0.04));
+  borderGradient.addColorStop(1, tint(FORCE_FIELD_GLASS_BORDER_BOTTOM));
 
   ctx.strokeStyle = borderGradient;
   ctx.lineWidth = 1;
   ctx.strokeRect(18, 18, viewportWidth - 36, viewportHeight - 36);
 
+  // Slow moonlight sweep.
   const sweepWidth = Math.max(180, viewportWidth * 0.24);
-  const sweepX = ((time * 70) % (viewportWidth + sweepWidth * 2)) - sweepWidth;
+  const sweepX =
+    ((time * FORCE_FIELD_GLASS_SWEEP_SPEED) % (viewportWidth + sweepWidth * 2)) - sweepWidth;
   const sweepGradient = ctx.createLinearGradient(0, 0, sweepWidth, 0);
-  sweepGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-  sweepGradient.addColorStop(0.5, `rgba(255, 255, 255, ${FORCE_FIELD_SWEEP_ALPHA})`);
-  sweepGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  sweepGradient.addColorStop(0, withAlpha(FORCE_FIELD_GLASS_SWEEP_TINT, 0));
+  sweepGradient.addColorStop(0.5, tint(FORCE_FIELD_GLASS_SWEEP_TINT));
+  sweepGradient.addColorStop(1, withAlpha(FORCE_FIELD_GLASS_SWEEP_TINT, 0));
 
   ctx.save();
   ctx.translate(sweepX, 0);
@@ -105,32 +170,131 @@ function drawGlassSurface(
   ctx.restore();
 }
 
-export function buildForceFieldParticles({
-  prepared,
+function drawPointerGlow(
+  ctx: CanvasRenderingContext2D,
+  pointer: ForceFieldPointer,
+  pointerRadius: number,
+): void {
+  if (!pointer.active) {
+    return;
+  }
+
+  const glow = ctx.createRadialGradient(
+    pointer.x,
+    pointer.y,
+    0,
+    pointer.x,
+    pointer.y,
+    pointerRadius,
+  );
+  glow.addColorStop(0, tint(FORCE_FIELD_POINTER_GLOW_CENTER));
+  glow.addColorStop(0.55, tint(FORCE_FIELD_POINTER_GLOW_MID));
+  glow.addColorStop(1, withAlpha(FORCE_FIELD_POINTER_GLOW_MID, 0));
+
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(pointer.x, pointer.y, pointerRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.closePath();
+}
+
+function drawColumnLabels(
+  ctx: CanvasRenderingContext2D,
+  labels: { left: string; right: string },
+  geometry: TwoColumnGeometry,
+): void {
+  ctx.save();
+  ctx.font = FORCE_FIELD_LABEL_FONT;
+  ctx.fillStyle = tint(FORCE_FIELD_LABEL_COLOR);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  // letterSpacing is Chromium 94+ / Safari 16.4+ / Firefox 105+.
+  // Assigning to unsupported contexts is a silent no-op on older runtimes.
+  const spaceable = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+  const previousLetterSpacing = spaceable.letterSpacing;
+  spaceable.letterSpacing = `${FORCE_FIELD_LABEL_TRACKING_EM}em`;
+
+  const labelY = geometry.blockTopY - FORCE_FIELD_LABEL_OFFSET_Y;
+  ctx.fillText(labels.left.toUpperCase(), geometry.left.startX, labelY);
+  ctx.fillText(labels.right.toUpperCase(), geometry.right.startX, labelY);
+
+  if (previousLetterSpacing !== undefined) {
+    spaceable.letterSpacing = previousLetterSpacing;
+  }
+  ctx.restore();
+}
+
+export function computeTwoColumnGeometry({
+  leftPrepared,
+  rightPrepared,
   viewportWidth,
   viewportHeight,
   lineHeight,
   textPadding,
-  maxTextWidth,
-  measureText,
-}: BuildForceFieldParticlesOptions): ForceFieldParticle[] {
-  const allowedWidth = viewportWidth - textPadding * 2;
-  const textBlockWidth = Math.min(allowedWidth, maxTextWidth);
+  columnWidth,
+  columnGutter,
+}: ComputeTwoColumnGeometryOptions): TwoColumnGeometry | null {
+  const totalWidth = columnWidth * 2 + columnGutter;
 
-  if (textBlockWidth <= 0) {
-    return [];
+  if (totalWidth <= 0) {
+    return null;
   }
 
-  const result = layoutWithLines(prepared, textBlockWidth, lineHeight);
-  const blockHeight = result.lineCount * lineHeight;
-  const startX = (viewportWidth - textBlockWidth) / 2;
-  const startY = Math.max(textPadding, (viewportHeight - blockHeight) / 2);
+  if (totalWidth > viewportWidth - textPadding * 2) {
+    return null;
+  }
+
+  const leftLayout = layoutWithLines(leftPrepared, columnWidth, lineHeight);
+  const rightLayout = layoutWithLines(rightPrepared, columnWidth, lineHeight);
+  const lineCount = Math.max(leftLayout.lineCount, rightLayout.lineCount);
+
+  if (lineCount <= 0) {
+    return null;
+  }
+
+  const blockHeight = lineCount * lineHeight;
+  const blockTopY = Math.max(textPadding, (viewportHeight - blockHeight) / 2);
+
+  if (blockTopY + blockHeight > viewportHeight - textPadding) {
+    return null;
+  }
+
+  const leftStartX = Math.round((viewportWidth - totalWidth) / 2);
+  const rightStartX = leftStartX + columnWidth + columnGutter;
+
+  return {
+    left: {
+      startX: leftStartX,
+      startY: blockTopY,
+      columnWidth,
+      lineCount: leftLayout.lineCount,
+    },
+    right: {
+      startX: rightStartX,
+      startY: blockTopY,
+      columnWidth,
+      lineCount: rightLayout.lineCount,
+    },
+    totalWidth,
+    blockHeight,
+    blockTopY,
+  };
+}
+
+function emitParticlesForColumn(
+  prepared: PreparedTextWithSegments,
+  geometry: ColumnGeometry,
+  lineHeight: number,
+  measureText: MeasureText,
+): ForceFieldParticle[] {
+  const layout = layoutWithLines(prepared, geometry.columnWidth, lineHeight);
   const particles: ForceFieldParticle[] = [];
 
-  for (let lineIndex = 0; lineIndex < result.lines.length; lineIndex += 1) {
-    const line = result.lines[lineIndex]!;
-    const lineY = startY + lineIndex * lineHeight;
-    let cursorX = startX;
+  for (let lineIndex = 0; lineIndex < layout.lines.length; lineIndex += 1) {
+    const line = layout.lines[lineIndex]!;
+    const lineY = geometry.startY + lineIndex * lineHeight;
+    let cursorX = geometry.startX;
 
     for (const { segment: character } of graphemeSegmenter.segment(line.text)) {
       const characterWidth = measureText(character);
@@ -155,6 +319,34 @@ export function buildForceFieldParticles({
   }
 
   return particles;
+}
+
+export function buildTwoColumnForceFieldParticles(
+  options: BuildTwoColumnForceFieldParticlesOptions,
+): BuildTwoColumnForceFieldParticlesResult {
+  const geometry = computeTwoColumnGeometry(options);
+
+  if (!geometry) {
+    return { particles: [], geometry: null };
+  }
+
+  const leftParticles = emitParticlesForColumn(
+    options.leftPrepared,
+    geometry.left,
+    options.lineHeight,
+    options.measureText,
+  );
+  const rightParticles = emitParticlesForColumn(
+    options.rightPrepared,
+    geometry.right,
+    options.lineHeight,
+    options.measureText,
+  );
+
+  return {
+    particles: [...leftParticles, ...rightParticles],
+    geometry,
+  };
 }
 
 export function simulateParticles(
@@ -224,33 +416,24 @@ export function renderForceField({
   viewportHeight,
   pointerRadius,
   time,
+  geometry,
+  labels,
 }: RenderForceFieldOptions): void {
   ctx.clearRect(0, 0, viewportWidth, viewportHeight);
 
   drawGlassSurface(ctx, viewportWidth, viewportHeight, time);
+  drawPointerGlow(ctx, pointer, pointerRadius);
 
-  if (pointer.active) {
-    const glow = ctx.createRadialGradient(
-      pointer.x,
-      pointer.y,
-      0,
-      pointer.x,
-      pointer.y,
-      pointerRadius,
-    );
-    glow.addColorStop(0, 'rgba(125, 170, 255, 0.11)');
-    glow.addColorStop(0.55, 'rgba(125, 170, 255, 0.04)');
-    glow.addColorStop(1, 'rgba(125, 170, 255, 0)');
-
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(pointer.x, pointer.y, pointerRadius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.closePath();
+  if (labels && geometry) {
+    drawColumnLabels(ctx, labels, geometry);
   }
 
+  ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
+  ctx.shadowColor = FORCE_FIELD_TEXT_SHADOW_COLOR;
+  ctx.shadowBlur = FORCE_FIELD_TEXT_SHADOW_BLUR;
+  ctx.shadowOffsetY = FORCE_FIELD_TEXT_SHADOW_OFFSET_Y;
 
   for (let index = 0; index < particles.length; index += 1) {
     const particle = particles[index]!;
@@ -267,4 +450,6 @@ export function renderForceField({
     ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
     ctx.fillText(particle.char, particle.x, particle.y);
   }
+
+  ctx.restore();
 }

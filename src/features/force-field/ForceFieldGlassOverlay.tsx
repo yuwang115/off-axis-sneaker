@@ -2,40 +2,64 @@ import React, { useEffect, useRef } from 'react';
 import { prepareWithSegments, type PreparedTextWithSegments } from '@chenglou/pretext';
 
 import {
+  FORCE_FIELD_COLUMN_GUTTER,
+  FORCE_FIELD_COLUMN_WIDTH,
   FORCE_FIELD_FONT,
+  FORCE_FIELD_LABEL_FONT,
   FORCE_FIELD_LINE_HEIGHT,
-  FORCE_FIELD_MAX_TEXT_WIDTH,
   FORCE_FIELD_PHYSICS,
   FORCE_FIELD_TEXT_PADDING,
 } from './constants';
 import {
-  buildForceFieldParticles,
+  buildTwoColumnForceFieldParticles,
   getMaxParticleDisplacement,
   renderForceField,
   simulateParticles,
   type ForceFieldParticle,
   type ForceFieldPointer,
+  type TwoColumnGeometry,
 } from './engine';
 
 interface ForceFieldGlassOverlayProps {
-  text: string;
+  leftText: string;
+  rightText: string;
+  leftLabel?: string;
+  rightLabel?: string;
   enabled?: boolean;
   className?: string;
 }
 
+type PreparedColumns = {
+  left: PreparedTextWithSegments;
+  right: PreparedTextWithSegments;
+};
+
 type OverlayRuntime = {
   frameId: number | null;
   lastTime: number | null;
-  prepared: PreparedTextWithSegments | null;
+  prepared: PreparedColumns | null;
   particles: ForceFieldParticle[];
+  geometry: TwoColumnGeometry | null;
   pointer: ForceFieldPointer;
   viewportWidth: number;
   viewportHeight: number;
 };
 
-function getFontsReadyPromise(): Promise<unknown> {
+function getOverlayFontsReady(): Promise<unknown> {
   const fonts = document.fonts as FontFaceSet | undefined;
-  return fonts?.ready ?? Promise.resolve();
+  if (!fonts) {
+    return Promise.resolve();
+  }
+  // `load` is specific: it resolves when the exact face+size combination is ready.
+  // Much faster than `ready`, which waits on every stylesheet in the document.
+  const loader = (fonts as unknown as { load?: (font: string) => Promise<unknown> }).load;
+  if (typeof loader !== 'function') {
+    return fonts.ready ?? Promise.resolve();
+  }
+  return Promise.all([
+    loader.call(fonts, FORCE_FIELD_FONT),
+    loader.call(fonts, FORCE_FIELD_LABEL_FONT),
+  ]).catch(() => fonts.ready ?? Promise.resolve());
 }
 
 function resetOverlayDataset(element: HTMLDivElement): void {
@@ -45,11 +69,14 @@ function resetOverlayDataset(element: HTMLDivElement): void {
   element.dataset.forceFieldDisplacement = '0';
 }
 
-const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
-  text,
+function ForceFieldGlassOverlay({
+  leftText,
+  rightText,
+  leftLabel,
+  rightLabel,
   enabled = true,
   className,
-}) => {
+}: ForceFieldGlassOverlayProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const runtimeRef = useRef<OverlayRuntime>({
@@ -57,6 +84,7 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
     lastTime: null,
     prepared: null,
     particles: [],
+    geometry: null,
     pointer: { x: -9999, y: -9999, active: false },
     viewportWidth: 0,
     viewportHeight: 0,
@@ -83,6 +111,7 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
     const runtime = runtimeRef.current;
     runtime.prepared = null;
     runtime.particles = [];
+    runtime.geometry = null;
     runtime.pointer = { x: -9999, y: -9999, active: false };
     runtime.lastTime = null;
     resetOverlayDataset(root);
@@ -118,15 +147,20 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
       const height = Math.max(1, Math.round(bounds.height));
       resizeCanvas(width, height);
 
-      runtime.particles = buildForceFieldParticles({
-        prepared: runtime.prepared,
+      const { particles, geometry } = buildTwoColumnForceFieldParticles({
+        leftPrepared: runtime.prepared.left,
+        rightPrepared: runtime.prepared.right,
         viewportWidth: width,
         viewportHeight: height,
         lineHeight: FORCE_FIELD_LINE_HEIGHT,
         textPadding: FORCE_FIELD_TEXT_PADDING,
-        maxTextWidth: FORCE_FIELD_MAX_TEXT_WIDTH,
+        columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+        columnGutter: FORCE_FIELD_COLUMN_GUTTER,
         measureText: (value) => context.measureText(value).width,
       });
+
+      runtime.particles = particles;
+      runtime.geometry = geometry;
       runtime.lastTime = null;
       syncDataset();
     };
@@ -163,6 +197,9 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
       }
     };
 
+    const labels =
+      leftLabel && rightLabel ? { left: leftLabel, right: rightLabel } : undefined;
+
     const frame = (now: number): void => {
       if (disposed) {
         return;
@@ -183,6 +220,8 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
         viewportHeight: runtime.viewportHeight,
         pointerRadius: FORCE_FIELD_PHYSICS.forceRadius,
         time: now / 1000,
+        geometry: runtime.geometry,
+        labels,
       });
       syncDataset();
 
@@ -198,12 +237,15 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
     window.addEventListener('blur', deactivatePointer);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    void getFontsReadyPromise().then(() => {
+    void getOverlayFontsReady().then(() => {
       if (disposed) {
         return;
       }
 
-      runtime.prepared = prepareWithSegments(text, FORCE_FIELD_FONT);
+      runtime.prepared = {
+        left: prepareWithSegments(leftText, FORCE_FIELD_FONT),
+        right: prepareWithSegments(rightText, FORCE_FIELD_FONT),
+      };
       rebuildParticles();
 
       if (runtime.frameId === null) {
@@ -225,7 +267,7 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
 
       resetOverlayDataset(root);
     };
-  }, [enabled, text]);
+  }, [enabled, leftText, rightText, leftLabel, rightLabel]);
 
   if (!enabled) {
     return null;
@@ -247,6 +289,6 @@ const ForceFieldGlassOverlay: React.FC<ForceFieldGlassOverlayProps> = ({
       />
     </div>
   );
-};
+}
 
 export default ForceFieldGlassOverlay;

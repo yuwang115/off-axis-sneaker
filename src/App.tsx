@@ -5,7 +5,12 @@ import ThreeView, { ThreeViewHandle } from './components/ThreeView';
 import CalibrationWizard from './components/CalibrationWizard';
 import ShoeControlPanel from './components/ShoeControlPanel';
 import ForceFieldGlassOverlay from './features/force-field/ForceFieldGlassOverlay';
-import { FORCE_FIELD_COPY } from './features/force-field/copy';
+import {
+  FORCE_FIELD_COPY_LEFT,
+  FORCE_FIELD_COPY_LEFT_LABEL,
+  FORCE_FIELD_COPY_RIGHT,
+  FORCE_FIELD_COPY_RIGHT_LABEL,
+} from './features/force-field/copy';
 import { calibrationManager, CalibrationData } from './utils/calibration';
 
 function App() {
@@ -175,7 +180,13 @@ function App() {
           </div>
         )}
 
-        <ForceFieldGlassOverlay text={FORCE_FIELD_COPY} enabled={showTextOverlay} />
+        <ForceFieldGlassOverlay
+          leftText={FORCE_FIELD_COPY_LEFT}
+          rightText={FORCE_FIELD_COPY_RIGHT}
+          leftLabel={FORCE_FIELD_COPY_LEFT_LABEL}
+          rightLabel={FORCE_FIELD_COPY_RIGHT_LABEL}
+          enabled={showTextOverlay}
+        />
 
         <ShoeControlPanel
           onPositionChange={handleShoePositionChange}

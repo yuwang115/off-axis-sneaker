@@ -2,61 +2,173 @@ import { prepareWithSegments } from '@chenglou/pretext';
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildForceFieldParticles,
+  buildTwoColumnForceFieldParticles,
+  computeTwoColumnGeometry,
   getMaxParticleDisplacement,
   renderForceField,
   simulateParticles,
   type ForceFieldParticle,
 } from './engine';
 import {
+  FORCE_FIELD_COLUMN_GUTTER,
+  FORCE_FIELD_COLUMN_WIDTH,
   FORCE_FIELD_FONT,
   FORCE_FIELD_LINE_HEIGHT,
-  FORCE_FIELD_MAX_TEXT_WIDTH,
   FORCE_FIELD_PHYSICS,
   FORCE_FIELD_TEXT_PADDING,
 } from './constants';
-import { FORCE_FIELD_COPY } from './copy';
+import {
+  FORCE_FIELD_COPY_LEFT,
+  FORCE_FIELD_COPY_LEFT_LABEL,
+  FORCE_FIELD_COPY_RIGHT,
+  FORCE_FIELD_COPY_RIGHT_LABEL,
+} from './copy';
 
 function cloneParticles(particles: ForceFieldParticle[]): ForceFieldParticle[] {
   return particles.map((particle) => ({ ...particle }));
 }
 
-describe('force-field engine', () => {
-  it('builds stable particles inside a centered reading area', () => {
-    const prepared = prepareWithSegments(FORCE_FIELD_COPY, FORCE_FIELD_FONT);
-    const viewportWidth = 1200;
-    const viewportHeight = 800;
+const LEFT_PREPARED = prepareWithSegments(FORCE_FIELD_COPY_LEFT, FORCE_FIELD_FONT);
+const RIGHT_PREPARED = prepareWithSegments(FORCE_FIELD_COPY_RIGHT, FORCE_FIELD_FONT);
 
-    const particles = buildForceFieldParticles({
-      prepared,
-      viewportWidth,
-      viewportHeight,
+const ASCII_MEASURE = (text: string): number =>
+  text.split('').reduce((total, character) => {
+    if (character === ' ') return total + 7;
+    return total + 11;
+  }, 0);
+
+describe('computeTwoColumnGeometry', () => {
+  it('centers the full two-column block horizontally in the viewport', () => {
+    const geometry = computeTwoColumnGeometry({
+      leftPrepared: LEFT_PREPARED,
+      rightPrepared: RIGHT_PREPARED,
+      viewportWidth: 1400,
+      viewportHeight: 900,
       lineHeight: FORCE_FIELD_LINE_HEIGHT,
       textPadding: FORCE_FIELD_TEXT_PADDING,
-      maxTextWidth: FORCE_FIELD_MAX_TEXT_WIDTH,
-      measureText: (text) => text.length * 12,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
     });
 
-    expect(particles.length).toBeGreaterThan(20);
+    expect(geometry).not.toBeNull();
+    if (!geometry) return;
 
-    const minX = Math.min(...particles.map((particle) => particle.homeX));
-    const maxX = Math.max(...particles.map((particle) => particle.homeX));
-    const minY = Math.min(...particles.map((particle) => particle.homeY));
-    const maxAllowedWidth = Math.min(
-      viewportWidth - FORCE_FIELD_TEXT_PADDING * 2,
-      FORCE_FIELD_MAX_TEXT_WIDTH,
+    expect(geometry.totalWidth).toBe(
+      FORCE_FIELD_COLUMN_WIDTH * 2 + FORCE_FIELD_COLUMN_GUTTER,
     );
-    const expectedStartX = (viewportWidth - maxAllowedWidth) / 2;
-
-    expect(minX).toBeGreaterThanOrEqual(expectedStartX);
-    expect(maxX).toBeLessThanOrEqual(expectedStartX + maxAllowedWidth);
-    expect(minY).toBeGreaterThanOrEqual(FORCE_FIELD_TEXT_PADDING);
+    expect(geometry.right.startX).toBe(
+      geometry.left.startX + FORCE_FIELD_COLUMN_WIDTH + FORCE_FIELD_COLUMN_GUTTER,
+    );
+    // Block is centered (allow 1px rounding).
+    const blockCenterX = geometry.left.startX + geometry.totalWidth / 2;
+    expect(Math.abs(blockCenterX - 1400 / 2)).toBeLessThanOrEqual(1);
   });
 
+  it('anchors both columns against the same top line (the taller column drives height)', () => {
+    const shortPrepared = prepareWithSegments('one two three', FORCE_FIELD_FONT);
+    const longPrepared = prepareWithSegments(
+      'This is a much longer paragraph that wraps across many more lines ' +
+        'than the short column because it contains a lot more words in total.',
+      FORCE_FIELD_FONT,
+    );
+
+    const geometry = computeTwoColumnGeometry({
+      leftPrepared: shortPrepared,
+      rightPrepared: longPrepared,
+      viewportWidth: 1400,
+      viewportHeight: 900,
+      lineHeight: FORCE_FIELD_LINE_HEIGHT,
+      textPadding: FORCE_FIELD_TEXT_PADDING,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
+    });
+
+    expect(geometry).not.toBeNull();
+    if (!geometry) return;
+
+    expect(geometry.left.startY).toBe(geometry.right.startY);
+    expect(geometry.right.lineCount).toBeGreaterThan(geometry.left.lineCount);
+    expect(geometry.blockHeight).toBe(geometry.right.lineCount * FORCE_FIELD_LINE_HEIGHT);
+  });
+
+  it('returns null when the two columns cannot fit the viewport width', () => {
+    const geometry = computeTwoColumnGeometry({
+      leftPrepared: LEFT_PREPARED,
+      rightPrepared: RIGHT_PREPARED,
+      viewportWidth: 700, // too narrow
+      viewportHeight: 900,
+      lineHeight: FORCE_FIELD_LINE_HEIGHT,
+      textPadding: FORCE_FIELD_TEXT_PADDING,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
+    });
+
+    expect(geometry).toBeNull();
+  });
+});
+
+describe('buildTwoColumnForceFieldParticles', () => {
+  it('produces particles for both columns with a clean horizontal separation', () => {
+    const { particles, geometry } = buildTwoColumnForceFieldParticles({
+      leftPrepared: LEFT_PREPARED,
+      rightPrepared: RIGHT_PREPARED,
+      viewportWidth: 1400,
+      viewportHeight: 900,
+      lineHeight: FORCE_FIELD_LINE_HEIGHT,
+      textPadding: FORCE_FIELD_TEXT_PADDING,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
+      measureText: ASCII_MEASURE,
+    });
+
+    expect(particles.length).toBeGreaterThan(40);
+    expect(geometry).not.toBeNull();
+    if (!geometry) return;
+
+    const leftColumnRight = geometry.left.startX + FORCE_FIELD_COLUMN_WIDTH;
+    const rightColumnLeft = geometry.right.startX;
+
+    const leftParticles = particles.filter(
+      (particle) => particle.homeX < leftColumnRight,
+    );
+    const rightParticles = particles.filter(
+      (particle) => particle.homeX > rightColumnLeft,
+    );
+
+    expect(leftParticles.length).toBeGreaterThan(10);
+    expect(rightParticles.length).toBeGreaterThan(10);
+    // Gutter is fully empty — no particle lives between the two columns.
+    expect(leftParticles.length + rightParticles.length).toBe(particles.length);
+
+    // Min right-column X is strictly greater than max left-column X.
+    const leftMaxX = Math.max(...leftParticles.map((p) => p.homeX));
+    const rightMinX = Math.min(...rightParticles.map((p) => p.homeX));
+    expect(rightMinX).toBeGreaterThan(leftMaxX);
+  });
+
+  it('returns empty particles and null geometry when the viewport cannot fit', () => {
+    const result = buildTwoColumnForceFieldParticles({
+      leftPrepared: LEFT_PREPARED,
+      rightPrepared: RIGHT_PREPARED,
+      viewportWidth: 600,
+      viewportHeight: 800,
+      lineHeight: FORCE_FIELD_LINE_HEIGHT,
+      textPadding: FORCE_FIELD_TEXT_PADDING,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
+      measureText: ASCII_MEASURE,
+    });
+
+    expect(result.particles).toEqual([]);
+    expect(result.geometry).toBeNull();
+  });
+});
+
+describe('simulateParticles', () => {
   it('repels particles near the pointer and lets them settle back home', () => {
     const particles: ForceFieldParticle[] = [
       {
-        char: '屏',
+        char: 'a',
         homeX: 200,
         homeY: 180,
         x: 200,
@@ -92,7 +204,7 @@ describe('force-field engine', () => {
   it('caps particle velocity even under strong force spikes', () => {
     const particles: ForceFieldParticle[] = [
       {
-        char: '面',
+        char: 'b',
         homeX: 150,
         homeY: 150,
         x: 152,
@@ -119,15 +231,16 @@ describe('force-field engine', () => {
   });
 
   it('does not drift when the pointer is inactive and particles are already home', () => {
-    const prepared = prepareWithSegments('静止文字', FORCE_FIELD_FONT);
-    const particles = buildForceFieldParticles({
-      prepared,
-      viewportWidth: 900,
-      viewportHeight: 600,
+    const { particles } = buildTwoColumnForceFieldParticles({
+      leftPrepared: prepareWithSegments('alpha bravo charlie delta', FORCE_FIELD_FONT),
+      rightPrepared: prepareWithSegments('echo foxtrot golf hotel', FORCE_FIELD_FONT),
+      viewportWidth: 1400,
+      viewportHeight: 900,
       lineHeight: FORCE_FIELD_LINE_HEIGHT,
       textPadding: FORCE_FIELD_TEXT_PADDING,
-      maxTextWidth: FORCE_FIELD_MAX_TEXT_WIDTH,
-      measureText: (text) => text.length * 14,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
+      measureText: ASCII_MEASURE,
     });
     const original = cloneParticles(particles);
 
@@ -141,25 +254,10 @@ describe('force-field engine', () => {
     expect(particles).toEqual(original);
   });
 
-  it('returns no particles when the viewport cannot fit the text block', () => {
-    const prepared = prepareWithSegments('太窄', FORCE_FIELD_FONT);
-    const particles = buildForceFieldParticles({
-      prepared,
-      viewportWidth: 100,
-      viewportHeight: 600,
-      lineHeight: FORCE_FIELD_LINE_HEIGHT,
-      textPadding: 72,
-      maxTextWidth: FORCE_FIELD_MAX_TEXT_WIDTH,
-      measureText: (text) => text.length * 12,
-    });
-
-    expect(particles).toEqual([]);
-  });
-
   it('ignores non-positive time deltas', () => {
     const particles: ForceFieldParticle[] = [
       {
-        char: '静',
+        char: 'c',
         homeX: 100,
         homeY: 120,
         x: 100,
@@ -177,7 +275,7 @@ describe('force-field engine', () => {
     );
 
     expect(particles[0]).toEqual({
-      char: '静',
+      char: 'c',
       homeX: 100,
       homeY: 120,
       x: 100,
@@ -186,14 +284,16 @@ describe('force-field engine', () => {
       vy: -5,
     });
   });
+});
 
-  it('renders glass highlights and active pointer glow', () => {
+describe('renderForceField', () => {
+  it('renders dark glass highlights, pointer glow, and shadowed text', () => {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d') as CanvasRenderingContext2D;
 
     const particles: ForceFieldParticle[] = [
       {
-        char: '玻',
+        char: 'a',
         homeX: 180,
         homeY: 200,
         x: 186,
@@ -207,8 +307,8 @@ describe('force-field engine', () => {
       ctx: context,
       particles,
       pointer: { x: 160, y: 190, active: true },
-      viewportWidth: 800,
-      viewportHeight: 600,
+      viewportWidth: 1200,
+      viewportHeight: 800,
       pointerRadius: FORCE_FIELD_PHYSICS.forceRadius,
       time: 1.2,
     });
@@ -222,7 +322,56 @@ describe('force-field engine', () => {
       0,
       Math.PI * 2,
     );
-    expect(context.fillText).toHaveBeenCalledWith('玻', 186, 204);
+    expect(context.fillText).toHaveBeenCalledWith('a', 186, 204);
+    // Shadow block is wrapped in save/restore so state cannot leak frames.
+    expect(context.save).toHaveBeenCalled();
+    expect(context.restore).toHaveBeenCalled();
     expect(getMaxParticleDisplacement(particles)).toBeGreaterThan(0);
+  });
+
+  it('draws column labels above each column when geometry and labels are provided', () => {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D;
+
+    const { particles, geometry } = buildTwoColumnForceFieldParticles({
+      leftPrepared: LEFT_PREPARED,
+      rightPrepared: RIGHT_PREPARED,
+      viewportWidth: 1400,
+      viewportHeight: 900,
+      lineHeight: FORCE_FIELD_LINE_HEIGHT,
+      textPadding: FORCE_FIELD_TEXT_PADDING,
+      columnWidth: FORCE_FIELD_COLUMN_WIDTH,
+      columnGutter: FORCE_FIELD_COLUMN_GUTTER,
+      measureText: ASCII_MEASURE,
+    });
+
+    expect(geometry).not.toBeNull();
+    if (!geometry) return;
+
+    renderForceField({
+      ctx: context,
+      particles,
+      pointer: { x: -9999, y: -9999, active: false },
+      viewportWidth: 1400,
+      viewportHeight: 900,
+      pointerRadius: FORCE_FIELD_PHYSICS.forceRadius,
+      time: 0,
+      geometry,
+      labels: {
+        left: FORCE_FIELD_COPY_LEFT_LABEL,
+        right: FORCE_FIELD_COPY_RIGHT_LABEL,
+      },
+    });
+
+    expect(context.fillText).toHaveBeenCalledWith(
+      FORCE_FIELD_COPY_LEFT_LABEL.toUpperCase(),
+      geometry.left.startX,
+      expect.any(Number),
+    );
+    expect(context.fillText).toHaveBeenCalledWith(
+      FORCE_FIELD_COPY_RIGHT_LABEL.toUpperCase(),
+      geometry.right.startX,
+      expect.any(Number),
+    );
   });
 });
